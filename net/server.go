@@ -29,6 +29,7 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	l      net.Listener
+	closed chan error
 }
 
 type ConnHandler func(Server, net.Conn)
@@ -50,9 +51,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.ctx = nctx
 	s.cancel = cancel
 	s.l = l
+	s.closed = make(chan error)
 	go func() {
 		<-nctx.Done()
-		l.Close()
+		s.closed <- l.Close()
 	}()
 
 	var tempDelay time.Duration
@@ -84,6 +86,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 }
 
-func (s *Server) Close() {
+func (s *Server) Close() error {
 	s.cancel()
+	return <-s.closed
 }
