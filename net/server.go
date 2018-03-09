@@ -28,6 +28,7 @@ type Server struct {
 	h      ConnHandler
 	ctx    context.Context
 	cancel context.CancelFunc
+	l      net.Listener
 }
 
 type ConnHandler func(Server, net.Conn)
@@ -48,6 +49,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	nctx, cancel := context.WithCancel(ctx)
 	s.ctx = nctx
 	s.cancel = cancel
+	s.l = l
+	go func() {
+		<-nctx.Done()
+		l.Close()
+	}()
 
 	var tempDelay time.Duration
 	for {
@@ -76,4 +82,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		tempDelay = 0
 		s.h(*s, conn)
 	}
+}
+
+func (s *Server) Close() {
+	s.cancel()
 }
