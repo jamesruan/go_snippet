@@ -5,7 +5,6 @@ import "os"
 import "log"
 import "net"
 import "time"
-import "sync"
 import "context"
 
 var ErrServerClose = errors.New("net: server closed")
@@ -13,17 +12,13 @@ var ErrServerClose = errors.New("net: server closed")
 type ServerArgs struct {
 	ListenNetwork string
 	ListenAddr    string
-	MinTempDelay  time.Duration
-	MaxTempDelay  time.Duration
 	*log.Logger
 }
 
-func NewServerArgs() *ServerArgs {
+func NewServerArgs(network, addr string) *ServerArgs {
 	a := new(ServerArgs)
-	a.ListenAddr = "[::1]:0"
-	a.ListenNetwork = "tcp"
-	a.MinTempDelay = 5 * time.Millisecond
-	a.MaxTempDelay = 5 * time.Second
+	a.ListenNetwork = network
+	a.ListenAddr = addr
 	a.Logger = log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile)
 	return a
 }
@@ -33,8 +28,6 @@ type Server struct {
 	h      ConnHandler
 	ctx    context.Context
 	cancel context.CancelFunc
-	mu     *sync.Mutex
-	l      net.Listener
 }
 
 type ConnHandler func(Server, net.Conn)
@@ -43,7 +36,6 @@ func NewServer(args ServerArgs, h ConnHandler) *Server {
 	return &Server{
 		ServerArgs: args,
 		h:          h,
-		mu:         new(sync.Mutex),
 	}
 }
 
@@ -73,8 +65,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 				} else {
 					tempDelay *= 2
 				}
-				if tempDelay > 1*time.Second {
-					tempDelay = s.MaxTempDelay
+				if max := 1 * time.Second; tempDelay > max {
+					tempDelay = max
 				}
 				time.Sleep(tempDelay)
 				continue
