@@ -7,7 +7,7 @@ import "net"
 import "time"
 import "context"
 
-var ErrServerClose = errors.New("net: server closed")
+var ErrServerClosed = errors.New("net: server closed")
 
 type ServerArgs struct {
 	ListenNetwork string
@@ -55,7 +55,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if err != nil {
 			select {
 			case <-s.ctx.Done():
-				return ErrServerClose
+				return ErrServerClosed
 			default:
 			}
 			// fast retry start from 5 milliseconds when temporary error
