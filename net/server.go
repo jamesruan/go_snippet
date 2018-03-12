@@ -131,9 +131,9 @@ func (s *Server) HandleConn(net.Conn) error {
 func (s *Server) Close() error {
 	err := make(chan error)
 	select {
-	case <-s.closed:
-		return nil
 	case s.closing <- err:
 		return <-err
+	default:
+		return nil
 	}
 }

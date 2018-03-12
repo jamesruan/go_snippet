@@ -4,6 +4,7 @@ import "os"
 import "log"
 import "net"
 import "time"
+import "errors"
 
 type ClientArgs struct {
 	RemoteNetwork string
@@ -19,31 +20,36 @@ func MakeClientArgs(network, addr string) ClientArgs {
 	}
 }
 
+var ErrClosedConn = errors.New("connecting a closed client")
+
 type Client struct {
 	ClientArgs
 	ConnHandler
-	conn   net.Conn
-	closed chan struct{}
+	conn    net.Conn
+	closed  chan struct{}
+	closing chan chan error
 }
 
 func NewClient(args ClientArgs) *Client {
 	return &Client{
 		ClientArgs: args,
 		closed:     make(chan struct{}),
+		closing:    make(chan chan error),
 	}
+	//TODO: runtime.SetFinalizer
 }
 
-//Blocks until handler is done with the conn
+//Must call Client.Close to release resources
 func (c *Client) Connect() error {
 	var tempDelay time.Duration
 	for {
+		select {
+		case <-c.closed:
+			return ErrClosedConn
+		default:
+		}
 		conn, err := net.Dial(c.RemoteNetwork, c.RemoteAddr)
 		if err != nil {
-			select {
-			case <-c.closed:
-				return nil
-			default:
-			}
 			// fast retry start from 5 milliseconds when temporary error
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
 				if tempDelay == 0 {
@@ -61,7 +67,11 @@ func (c *Client) Connect() error {
 			return err
 		}
 		c.conn = conn
-		defer conn.Close()
+		go func() {
+			reply := <-c.closing
+			close(c.closed)
+			reply <- conn.Close()
+		}()
 		return c.HandleConn(conn)
 	}
 }
@@ -72,10 +82,11 @@ func (c *Client) HandleConn(net.Conn) error {
 }
 
 func (c *Client) Close() error {
+	err := make(chan error)
 	select {
-	case <-c.closed:
-		return nil
+	case c.closing <- err:
+		return <-err
 	default:
-		return c.conn.Close()
+		return nil
 	}
 }
