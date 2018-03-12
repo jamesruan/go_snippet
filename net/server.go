@@ -5,7 +5,6 @@ import "os"
 import "log"
 import "net"
 import "time"
-import "context"
 
 var ErrServerClosed = errors.New("net: server closed")
 
@@ -15,55 +14,86 @@ type ServerArgs struct {
 	*log.Logger
 }
 
-func NewServerArgs(network, addr string) *ServerArgs {
-	a := new(ServerArgs)
-	a.ListenNetwork = network
-	a.ListenAddr = addr
-	a.Logger = log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile)
-	return a
+func MakeServerArgs(network, addr string) ServerArgs {
+	return ServerArgs{
+		ListenNetwork: network,
+		ListenAddr:    addr,
+		Logger:        log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile),
+	}
+}
+
+type acceptResult struct {
+	conn net.Conn
+	err  error
 }
 
 type Server struct {
 	ServerArgs
-	h      ConnHandler
-	ctx    context.Context
-	cancel context.CancelFunc
-	l      net.Listener
-	closed chan error
+	ConnHandler
+	l           net.Listener
+	startAccept chan struct{}
+	accepted    chan acceptResult
+	closed      chan struct{}
+	closing     chan chan error
 }
 
-type ConnHandler func(Server, net.Conn)
+type ConnHandler interface {
+	HandleConn(net.Conn) error
+}
 
-func NewServer(args ServerArgs, h ConnHandler) *Server {
+func NewServer(args ServerArgs) *Server {
 	return &Server{
-		ServerArgs: args,
-		h:          h,
+		ServerArgs:  args,
+		startAccept: make(chan struct{}, 1),
+		accepted:    make(chan acceptResult),
+		closed:      make(chan struct{}),
+		closing:     make(chan chan error),
 	}
 }
 
-func (s *Server) ListenAndServe(ctx context.Context) error {
+//Blocks until accepting error
+func (s *Server) ListenAndServe() error {
 	l, err := net.Listen(s.ListenNetwork, s.ListenAddr)
 	if err != nil {
 		return err
 	}
-	defer l.Close()
-	nctx, cancel := context.WithCancel(ctx)
-	s.ctx = nctx
-	s.cancel = cancel
 	s.l = l
-	s.closed = make(chan error)
-	go func() {
-		<-nctx.Done()
-		s.closed <- l.Close()
-	}()
 
+	defer s.l.Close()
+	defer close(s.closed)
+
+	s.startAccept <- struct{}{}
+
+	for {
+		select {
+		case reply := <-s.closing:
+			reply <- l.Close()
+		case <-s.startAccept:
+			go s.doAccept()
+		case result := <-s.accepted:
+			if result.err != nil {
+				return err
+			}
+			go func() {
+				defer result.conn.Close()
+				if err := s.HandleConn(result.conn); err != nil {
+					s.Logger.Printf("HandleConn: %s", err)
+				}
+			}()
+			s.startAccept <- struct{}{}
+		}
+	}
+}
+
+func (s *Server) doAccept() {
 	var tempDelay time.Duration
 	for {
-		conn, err := l.Accept()
+		conn, err := s.l.Accept()
 		if err != nil {
 			select {
-			case <-s.ctx.Done():
-				return ErrServerClosed
+			case <-s.closed:
+				s.accepted <- acceptResult{nil, ErrServerClosed}
+				return
 			default:
 			}
 			// fast retry start from 5 milliseconds when temporary error
@@ -76,17 +106,29 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
+				s.Logger.Printf("accept: %s", ne)
 				time.Sleep(tempDelay)
 				continue
 			}
-			return err
+			s.accepted <- acceptResult{nil, err}
+			return
 		}
-		tempDelay = 0
-		s.h(*s, conn)
+		s.accepted <- acceptResult{conn, err}
+		return
 	}
 }
 
+func (s *Server) HandleConn(net.Conn) error {
+	s.Logger.Printf("not implemented")
+	return nil
+}
+
 func (s *Server) Close() error {
-	s.cancel()
-	return <-s.closed
+	err := make(chan error)
+	select {
+	case <-s.closed:
+		return nil
+	case s.closing <- err:
+		return <-err
+	}
 }
