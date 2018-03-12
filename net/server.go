@@ -60,18 +60,23 @@ func (s *Server) ListenAndServe() error {
 	s.l = l
 
 	defer s.l.Close()
-	defer close(s.closed)
 
 	s.startAccept <- struct{}{}
 
 	for {
 		select {
 		case reply := <-s.closing:
+			close(s.closed)
 			reply <- l.Close()
 		case <-s.startAccept:
 			go s.doAccept()
 		case result := <-s.accepted:
 			if result.err != nil {
+				select {
+				case <-s.closed:
+				default:
+					close(s.closed)
+				}
 				return err
 			}
 			go func() {
