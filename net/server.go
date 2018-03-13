@@ -1,10 +1,12 @@
 package net
 
-import "errors"
-import "os"
-import "log"
-import "net"
-import "time"
+import (
+	"errors"
+	"log"
+	"net"
+	"os"
+	"time"
+)
 
 var ErrServerClosed = errors.New("net: server closed")
 
@@ -77,7 +79,7 @@ func (s *Server) ListenAndServe() error {
 				default:
 					close(s.closed)
 				}
-				return err
+				return result.err
 			}
 			go func() {
 				defer result.conn.Close()

@@ -1,16 +1,20 @@
 package net
 
-import "os"
-import "log"
-import "net"
-import "time"
-import "errors"
+import (
+	"errors"
+	"log"
+	"net"
+	"os"
+	"time"
+)
 
 type ClientArgs struct {
 	RemoteNetwork string
 	RemoteAddr    string
 	*log.Logger
 }
+
+var ErrClosedConn = errors.New("connecting a closed client")
 
 func MakeClientArgs(network, addr string) ClientArgs {
 	return ClientArgs{
@@ -19,8 +23,6 @@ func MakeClientArgs(network, addr string) ClientArgs {
 		Logger:        log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile),
 	}
 }
-
-var ErrClosedConn = errors.New("connecting a closed client")
 
 type Client struct {
 	ClientArgs
