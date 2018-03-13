@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"runtime"
 	"time"
 )
 
@@ -14,7 +15,10 @@ type ClientArgs struct {
 	*log.Logger
 }
 
-var ErrClosedConn = errors.New("connecting a closed client")
+var (
+	ErrClosedConn = errors.New("connecting a closed client")
+	ErrOpenedConn = errors.New("connecting an opened client")
+)
 
 func MakeClientArgs(network, addr string) ClientArgs {
 	return ClientArgs{
@@ -33,15 +37,18 @@ type Client struct {
 }
 
 func NewClient(args ClientArgs) *Client {
-	return &Client{
+	c := &Client{
 		ClientArgs: args,
 		closed:     make(chan struct{}),
 		closing:    make(chan chan error),
 	}
-	//TODO: runtime.SetFinalizer
+	// in case that Close() is not called
+	runtime.SetFinalizer(c, func(o *Client) {
+		o.Close()
+	})
+	return c
 }
 
-//Must call Client.Close to release resources
 func (c *Client) Connect() error {
 	var tempDelay time.Duration
 	for {
@@ -49,6 +56,9 @@ func (c *Client) Connect() error {
 		case <-c.closed:
 			return ErrClosedConn
 		default:
+			if c.conn != nil {
+				return ErrOpenedConn
+			}
 		}
 		conn, err := net.Dial(c.RemoteNetwork, c.RemoteAddr)
 		if err != nil {

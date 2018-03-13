@@ -61,8 +61,6 @@ func (s *Server) ListenAndServe() error {
 	}
 	s.l = l
 
-	defer s.l.Close()
-
 	s.startAccept <- struct{}{}
 
 	for {
@@ -78,6 +76,7 @@ func (s *Server) ListenAndServe() error {
 				case <-s.closed:
 				default:
 					close(s.closed)
+					l.Close()
 				}
 				return result.err
 			}
