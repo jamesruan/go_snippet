@@ -1,6 +1,7 @@
 package net
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net"
@@ -49,7 +50,7 @@ func NewClient(args ClientArgs) *Client {
 	return c
 }
 
-func (c *Client) Connect() error {
+func (c *Client) Connect(ctx context.Context) error {
 	var tempDelay time.Duration
 	for {
 		select {
@@ -60,7 +61,8 @@ func (c *Client) Connect() error {
 				return ErrOpenedConn
 			}
 		}
-		conn, err := net.Dial(c.RemoteNetwork, c.RemoteAddr)
+		dialer := &net.Dialer{}
+		conn, err := dialer.DialContext(ctx, c.RemoteNetwork, c.RemoteAddr)
 		if err != nil {
 			// fast retry start from 5 milliseconds when temporary error
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
