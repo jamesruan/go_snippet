@@ -32,11 +32,9 @@ type acceptResult struct {
 type Server struct {
 	ServerArgs
 	ConnHandler
-	l           net.Listener
-	startAccept chan struct{}
-	accepted    chan acceptResult
-	closed      chan struct{}
-	closing     chan chan error
+	l       net.Listener
+	closed  chan struct{}
+	closing chan chan error
 }
 
 type ConnHandler interface {
@@ -45,11 +43,9 @@ type ConnHandler interface {
 
 func NewServer(args ServerArgs) *Server {
 	return &Server{
-		ServerArgs:  args,
-		startAccept: make(chan struct{}, 1),
-		accepted:    make(chan acceptResult),
-		closed:      make(chan struct{}),
-		closing:     make(chan chan error),
+		ServerArgs: args,
+		closed:     make(chan struct{}),
+		closing:    make(chan chan error),
 	}
 }
 
@@ -61,23 +57,14 @@ func (s *Server) ListenAndServe() error {
 	}
 	s.l = l
 
-	s.startAccept <- struct{}{}
-
+	accepted := s.doAccept()
 	for {
 		select {
 		case reply := <-s.closing:
 			close(s.closed)
 			reply <- l.Close()
-		case <-s.startAccept:
-			go s.doAccept()
-		case result := <-s.accepted:
+		case result := <-accepted:
 			if result.err != nil {
-				select {
-				case <-s.closed:
-				default:
-					close(s.closed)
-					l.Close()
-				}
 				return result.err
 			}
 			go func() {
@@ -86,42 +73,48 @@ func (s *Server) ListenAndServe() error {
 					s.Logger.Printf("HandleConn: %s", err)
 				}
 			}()
-			s.startAccept <- struct{}{}
+			accepted = s.doAccept()
 		}
 	}
 }
 
-func (s *Server) doAccept() {
+func (s *Server) doAccept() <-chan acceptResult {
 	var tempDelay time.Duration
-	for {
-		conn, err := s.l.Accept()
-		if err != nil {
-			select {
-			case <-s.closed:
-				s.accepted <- acceptResult{nil, ErrServerClosed}
+	ch := make(chan acceptResult)
+	go func() {
+		for {
+			conn, err := s.l.Accept()
+			if err != nil {
+				select {
+				case <-s.closed:
+					ch <- acceptResult{nil, ErrServerClosed}
+					return
+				default:
+				}
+				// fast retry start from 5 milliseconds when temporary error
+				if ne, ok := err.(net.Error); ok && ne.Temporary() {
+					if tempDelay == 0 {
+						tempDelay = 5 * time.Millisecond
+					} else {
+						tempDelay *= 2
+					}
+					if max := 1 * time.Second; tempDelay > max {
+						tempDelay = max
+					}
+					s.Logger.Printf("accept: %s", ne)
+					time.Sleep(tempDelay)
+					continue
+				}
+				close(s.closed)
+				s.l.Close()
+				ch <- acceptResult{nil, err}
 				return
-			default:
 			}
-			// fast retry start from 5 milliseconds when temporary error
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				if tempDelay == 0 {
-					tempDelay = 5 * time.Millisecond
-				} else {
-					tempDelay *= 2
-				}
-				if max := 1 * time.Second; tempDelay > max {
-					tempDelay = max
-				}
-				s.Logger.Printf("accept: %s", ne)
-				time.Sleep(tempDelay)
-				continue
-			}
-			s.accepted <- acceptResult{nil, err}
+			ch <- acceptResult{conn, nil}
 			return
 		}
-		s.accepted <- acceptResult{conn, err}
-		return
-	}
+	}()
+	return ch
 }
 
 func (s *Server) HandleConn(net.Conn) error {
