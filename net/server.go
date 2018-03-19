@@ -41,11 +41,12 @@ type ConnHandler interface {
 	HandleConn(net.Conn) error
 }
 
-func NewServer(args ServerArgs) *Server {
+func NewServer(args ServerArgs, handler ConnHandler) *Server {
 	return &Server{
-		ServerArgs: args,
-		closed:     make(chan struct{}),
-		closing:    make(chan chan error),
+		ServerArgs:  args,
+		ConnHandler: handler,
+		closed:      make(chan struct{}),
+		closing:     make(chan chan error),
 	}
 }
 
@@ -115,11 +116,6 @@ func (s *Server) doAccept() <-chan acceptResult {
 		}
 	}()
 	return ch
-}
-
-func (s *Server) HandleConn(net.Conn) error {
-	s.Logger.Printf("not implemented")
-	return nil
 }
 
 func (s *Server) Close() error {

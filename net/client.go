@@ -37,11 +37,12 @@ type Client struct {
 	closing chan chan error
 }
 
-func NewClient(args ClientArgs) *Client {
+func NewClient(args ClientArgs, handler ConnHandler) *Client {
 	c := &Client{
-		ClientArgs: args,
-		closed:     make(chan struct{}),
-		closing:    make(chan chan error),
+		ClientArgs:  args,
+		ConnHandler: handler,
+		closed:      make(chan struct{}),
+		closing:     make(chan chan error),
 	}
 	// in case that Close() is not called
 	runtime.SetFinalizer(c, func(o *Client) {
@@ -88,11 +89,6 @@ func (c *Client) Connect(ctx context.Context) error {
 		}()
 		return c.HandleConn(conn)
 	}
-}
-
-func (c *Client) HandleConn(net.Conn) error {
-	c.Logger.Printf("not implemented")
-	return nil
 }
 
 func (c *Client) Close() error {
