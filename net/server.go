@@ -66,13 +66,18 @@ func (s *Server) ListenAndServe() error {
 			reply <- l.Close()
 		case result := <-accepted:
 			if result.err != nil {
+				if result.err != ErrServerClosed {
+					s.Logger.Printf("accept: %s, closing", result.err)
+					close(s.closed)
+					return s.l.Close()
+				}
 				return result.err
 			}
 			go func() {
-				defer result.conn.Close()
 				if err := s.HandleConn(result.conn); err != nil {
 					s.Logger.Printf("HandleConn: %s", err)
 				}
+				result.conn.Close()
 			}()
 			accepted = s.doAccept()
 		}
@@ -102,8 +107,6 @@ func (s *Server) doAccept() <-chan acceptResult {
 					tempDelay *= 2
 					continue
 				}
-				close(s.closed)
-				s.l.Close()
 				ch <- acceptResult{nil, err}
 				return
 			}
