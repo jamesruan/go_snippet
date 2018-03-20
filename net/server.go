@@ -80,7 +80,7 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) doAccept() <-chan acceptResult {
-	var tempDelay time.Duration
+	tempDelay := 5 * time.Millisecond
 	ch := make(chan acceptResult)
 	go func() {
 		for {
@@ -94,16 +94,12 @@ func (s *Server) doAccept() <-chan acceptResult {
 				}
 				// fast retry start from 5 milliseconds when temporary error
 				if ne, ok := err.(net.Error); ok && ne.Temporary() {
-					if tempDelay == 0 {
-						tempDelay = 5 * time.Millisecond
-					} else {
-						tempDelay *= 2
-					}
 					if max := 1 * time.Second; tempDelay > max {
 						tempDelay = max
 					}
-					s.Logger.Printf("accept: %s", ne)
+					s.Logger.Printf("accept: %s, retry in %s", ne, tempDelay)
 					time.Sleep(tempDelay)
+					tempDelay *= 2
 					continue
 				}
 				close(s.closed)
